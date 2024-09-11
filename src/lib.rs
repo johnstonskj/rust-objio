@@ -41,7 +41,6 @@
     dyn_drop,
 )]
 
-use std::fmt::Display;
 use std::fs::OpenOptions;
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
@@ -49,12 +48,6 @@ use std::path::Path;
 // ------------------------------------------------------------------------------------------------
 // Public Types
 // ------------------------------------------------------------------------------------------------
-
-#[derive(Debug)]
-pub enum Error<T: ::std::error::Error> {
-    Io(::std::io::Error),
-    Other(T),
-}
 
 pub trait HasOptions<T: Default> {
     fn with_options(self, options: T) -> Self
@@ -71,14 +64,16 @@ pub trait HasOptions<T: Default> {
     fn options(&self) -> &T;
 }
 
-pub trait ObjectReader<T> {
-    type Error: ::std::error::Error;
+// ------------------------------------------------------------------------------------------------
 
-    fn read<R>(&self, r: &mut R) -> Result<T, Error<Self::Error>>
+pub trait ObjectReader<T> {
+    type Error: From<::std::io::Error>;
+
+    fn read<R>(&self, r: &mut R) -> Result<T, Self::Error>
     where
         R: Read;
 
-    fn read_from_string<S>(&self, string: S) -> Result<T, Error<Self::Error>>
+    fn read_from_string<S>(&self, string: S) -> Result<T, Self::Error>
     where
         S: AsRef<str>,
     {
@@ -86,32 +81,31 @@ pub trait ObjectReader<T> {
         self.read(&mut data)
     }
 
-    fn read_from_file<P>(&self, path: P) -> Result<T, Error<Self::Error>>
+    fn read_from_file<P>(&self, path: P) -> Result<T, Self::Error>
     where
         P: AsRef<Path>,
     {
-        let mut file = OpenOptions::new()
-            .read(true)
-            .open(path.as_ref())
-            .map_err(Error::Io)?;
+        let mut file = OpenOptions::new().read(true).open(path.as_ref())?;
         self.read(&mut file)
     }
 }
 
-pub trait ObjectWriter<T> {
-    type Error: ::std::error::Error;
+// ------------------------------------------------------------------------------------------------
 
-    fn write<W>(&self, w: &mut W, object: &T) -> Result<(), Error<Self::Error>>
+pub trait ObjectWriter<T> {
+    type Error: From<::std::io::Error>;
+
+    fn write<W>(&self, w: &mut W, object: &T) -> Result<(), Self::Error>
     where
         W: Write;
 
-    fn write_to_string(&self, object: &T) -> Result<String, Error<Self::Error>> {
+    fn write_to_string(&self, object: &T) -> Result<String, Self::Error> {
         let mut buffer = Cursor::new(Vec::new());
         self.write(&mut buffer, object)?;
         Ok(String::from_utf8(buffer.into_inner()).unwrap())
     }
 
-    fn write_to_file<P>(&self, object: &T, path: P) -> Result<(), Error<Self::Error>>
+    fn write_to_file<P>(&self, object: &T, path: P) -> Result<(), Self::Error>
     where
         P: AsRef<Path>,
     {
@@ -119,8 +113,7 @@ pub trait ObjectWriter<T> {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(path.as_ref())
-            .map_err(Error::Io)?;
+            .open(path.as_ref())?;
         self.write(&mut file, object)
     }
 }
@@ -182,31 +175,93 @@ macro_rules! impl_into_string_writer {
 }
 
 // ------------------------------------------------------------------------------------------------
-// Implementations
+// Unit Tests
 // ------------------------------------------------------------------------------------------------
 
-impl<T: ::std::error::Error> Display for Error<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::Io(e) => format!("I/O error: {e}"),
-                Self::Other(e) => format!("Non-I/O error: {e}"),
-            }
-        )
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl<T: ::std::error::Error + 'static> ::std::error::Error for Error<T> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::Other(e) => Some(e),
+    #[derive(Debug, Default)]
+    struct TestError {}
+
+    impl From<::std::io::Error> for TestError {
+        fn from(_: ::std::io::Error) -> Self {
+            Self {}
         }
     }
-}
 
-// ------------------------------------------------------------------------------------------------
-// Modules
-// ------------------------------------------------------------------------------------------------
+    #[test]
+    fn test_manual_options() {
+        #[derive(Debug, Default)]
+        struct TestOptions {
+            count: u32,
+        }
+
+        #[derive(Debug, Default)]
+        struct TestObject {
+            options: TestOptions,
+        }
+
+        impl HasOptions<TestOptions> for TestObject {
+            fn set_options(&mut self, options: TestOptions) {
+                self.options = options
+            }
+
+            fn options(&self) -> &TestOptions {
+                &self.options
+            }
+        }
+
+        let obj = TestObject::default().with_options(TestOptions { count: 2 });
+
+        assert_eq!(obj.options().count, 2);
+    }
+
+    #[test]
+    fn test_macro_options() {
+        #[derive(Debug, Default)]
+        struct TestOptions {
+            count: u32,
+        }
+
+        #[derive(Debug, Default)]
+        struct TestObject {
+            options: TestOptions,
+        }
+
+        impl_has_options!(TestObject, TestOptions);
+
+        let obj = TestObject::default().with_options(TestOptions { count: 2 });
+
+        assert_eq!(obj.options().count, 2);
+    }
+
+    #[test]
+    fn test_writer_to_string() {
+        #[derive(Debug, Default)]
+        struct TestObject {}
+
+        #[derive(Debug, Default)]
+        struct TestWriter {}
+
+        impl ObjectWriter<TestObject> for TestWriter {
+            type Error = TestError;
+
+            fn write<W>(&self, w: &mut W, _object: &TestObject) -> Result<(), Self::Error>
+            where
+                W: Write,
+            {
+                w.write_all(b"Hello")?;
+                Ok(())
+            }
+        }
+
+        let writer = TestWriter::default();
+
+        assert_eq!(
+            writer.write_to_string(&TestObject::default()).unwrap(),
+            "Hello".to_string()
+        );
+    }
+}

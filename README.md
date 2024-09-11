@@ -12,6 +12,13 @@ TBD.
 
 ## Changes
 
+### Version 0.1.1
+
+* Refactor: updated error type processing.
+  * Removed custom `Error` type.
+  * Changed trait Error types to have a constraint requiring
+    `From<<std::io::Error>>`.
+
 ### Version 0.1.0
 
 * Initial release.
