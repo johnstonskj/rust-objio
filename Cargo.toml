@@ -1,0 +1,14 @@
+[package]
+name = "objio"
+version = "0.1.0"
+authors = ["Simon Johnston <johnstonskj@gmail.com>"]
+description = "This crate provides simple traits for reading and writing objects."
+documentation = "https://docs.rs/objio/"
+repository = "https://github.com/johnstonskj/rust-objio.git"
+license = "MIT"
+readme = "README.md"
+edition = "2021"
+publish = true
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
