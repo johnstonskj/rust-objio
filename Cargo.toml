@@ -1,6 +1,6 @@
 [package]
 name = "objio"
-version = "0.1.1"
+version = "0.1.12
 authors = ["Simon Johnston <johnstonskj@gmail.com>"]
 description = "This crate provides simple traits for reading and writing objects."
 documentation = "https://docs.rs/objio/"

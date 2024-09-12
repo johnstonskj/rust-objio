@@ -12,6 +12,11 @@ TBD.
 
 ## Changes
 
+### Version 0.1.2
+
+* Documentation: added documentation to all traits and a detailed example at
+the module level.
+
 ### Version 0.1.1
 
 * Refactor: updated error type processing.

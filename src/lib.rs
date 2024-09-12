@@ -1,5 +1,87 @@
 /*!
 
+This crate provides simple traits for reading and writing objects.
+
+The traits [`ObjectReader`] and [`ObjectWriter`] are **not** intended as a generalized serialization
+framework like [serde](https://serde.rs), they are provided to simply read/write specific object
+types in specific formats. These traits were refactored from the `rdftk_io` crate that provided a
+number of parsers and generators for different RDF representations.
+
+As a number of implementations require options to configure parsers and generators the trait
+[`HasOptions`] can be implemented to provide this in a common manner.
+
+# Example Writer
+
+3. The type `TestObject` is the type we wich to be able to write, it has a single string field.
+1. The type `TestError` is required as it can be created from an IO error instance.
+2. The type `TestOptions` are the options that configure our generator, currently only defining the
+   amount of indentation before writing `TestObject` instances.
+4. The type TestWriter` is where the magic starts, ...
+   1. It contains a field for the options above.
+   2. It implements the trait `HasOptions` using the macro `impl_has_options!`.
+   3. It implements the trait `ObjectWriter`.
+5. We the construct an example instance of the test object and an instance of the writer with
+   options.
+6. Finally, we write the example object and compare it to expected results.
+
+```rust
+use objio::{impl_has_options, HasOptions, ObjectWriter};
+use std::io::Write;
+
+#[derive(Debug, Default)]
+struct TestObject { // our writeable type
+    value: String,
+}
+# impl From<&str> for TestObject {
+#     fn from(s: &str) -> Self {
+#         Self { value: s.to_string() }
+#     }
+# }
+
+#[derive(Debug, Default)]
+struct TestError {} // implements From<std::io::Error>
+# impl From<::std::io::Error> for TestError {
+#    fn from(_: ::std::io::Error) -> Self {
+#        Self {}
+#    }
+# }
+
+#[derive(Debug, Default)]
+struct TestOptions {
+    indent: usize,
+}
+
+#[derive(Debug, Default)]
+struct TestWriter {
+    options: TestOptions,
+}
+
+impl_has_options!(TestWriter, TestOptions);
+
+impl ObjectWriter<TestObject> for TestWriter {
+    type Error = TestError;
+
+    fn write<W>(&self, w: &mut W, object: &TestObject) -> Result<(), Self::Error>
+    where
+        W: Write,
+    {
+        let indent = self.options.indent;
+        let value = &object.value;
+        w.write_all(format!("{:indent$}{value}", "").as_bytes())?;
+        Ok(())
+    }
+}
+
+let example = TestObject::from("Hello");
+let writer = TestWriter::default().with_options(TestOptions { indent: 2 });
+
+assert_eq!(
+    writer.write_to_string(&example).unwrap(),
+    "  Hello".to_string()
+);
+
+```
+
 */
 
 #![warn(
@@ -49,7 +131,38 @@ use std::path::Path;
 // Public Types
 // ------------------------------------------------------------------------------------------------
 
+///
+/// This trait is implemented by reader or writer types to attach option instances for
+/// configuration.
+///
+/// Note that the option type `T` **must** implement `Default` so that it is not necessary to
+/// require an option during construction of the reader or writer.
+///
 pub trait HasOptions<T: Default> {
+    ///
+    /// A builder-like function that can be called after the default constructor.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use objio::{impl_has_options, HasOptions};
+    /// # fn get_options_from_config() -> TestOptions { Default::default() }
+    /// #[derive(Debug, Default)]
+    /// struct TestOptions {
+    ///     indent: usize,
+    /// }
+    ///
+    /// #[derive(Debug, Default)]
+    /// struct TestWriter {
+    ///     options: TestOptions,
+    /// }
+    ///
+    /// impl_has_options!(TestWriter, TestOptions);
+    ///
+    /// let writer = TestWriter::default()
+    ///     .with_options(get_options_from_config());
+    /// ```
+    ///
     fn with_options(self, options: T) -> Self
     where
         Self: Sized,
@@ -59,20 +172,40 @@ pub trait HasOptions<T: Default> {
         self_mut
     }
 
+    ///
+    /// Set the current options value to `options`.
+    ///
     fn set_options(&mut self, options: T);
 
+    ///
+    /// Returns a reference to the current options.
+    ///
     fn options(&self) -> &T;
 }
 
 // ------------------------------------------------------------------------------------------------
 
+///
+/// The trait implemented by types which read instances of `T`.
+///
 pub trait ObjectReader<T> {
+    ///
+    /// The type indicating errors, this **must** implement the conversion from `io::Error` as this
+    /// error is intrinsic to the methods on `Read`. This constraint allows the error type to also
+    /// signal parser errors related to the content itself.
+    ///
     type Error: From<::std::io::Error>;
 
+    ///
+    /// Read an instance of `T` from the provided implementation of `Read`.
+    ///
     fn read<R>(&self, r: &mut R) -> Result<T, Self::Error>
     where
         R: Read;
 
+    ///
+    /// Read an instance of `T` from the provided string.
+    ///
     fn read_from_string<S>(&self, string: S) -> Result<T, Self::Error>
     where
         S: AsRef<str>,
@@ -81,6 +214,11 @@ pub trait ObjectReader<T> {
         self.read(&mut data)
     }
 
+    ///
+    /// Read an instance of `T` from the file identified by `path`.
+    ///
+    /// This method will return an IO error if the path is invalid, or file does not exist.
+    ///
     fn read_from_file<P>(&self, path: P) -> Result<T, Self::Error>
     where
         P: AsRef<Path>,
@@ -92,19 +230,39 @@ pub trait ObjectReader<T> {
 
 // ------------------------------------------------------------------------------------------------
 
+///
+/// The trait implemented by types which write instances of `T`.
+///
 pub trait ObjectWriter<T> {
+    ///
+    /// The type indicating errors, this **must** implement the conversion from `io::Error` as this
+    /// error is intrinsic to the methods on `Write`. This constraint allows the error type to also
+    /// signal serialization errors related to the content itself.
+    ///
     type Error: From<::std::io::Error>;
 
+    ///
+    /// Write an instance of `T` to the provided implementation of `Write`.
+    ///
     fn write<W>(&self, w: &mut W, object: &T) -> Result<(), Self::Error>
     where
         W: Write;
 
+    ///
+    /// Write an instance of `T` to, and return, a string.
+    ///
     fn write_to_string(&self, object: &T) -> Result<String, Self::Error> {
         let mut buffer = Cursor::new(Vec::new());
         self.write(&mut buffer, object)?;
         Ok(String::from_utf8(buffer.into_inner()).unwrap())
     }
 
+    ///
+    /// Write an instance of `T` into the file identified by `path`.
+    ///
+    /// This method will return an IO error if the path is invalid, or the file is not writeable.
+    /// If the file exists it will be replaced.
+    ///
     fn write_to_file<P>(&self, object: &T, path: P) -> Result<(), Self::Error>
     where
         P: AsRef<Path>,
@@ -122,6 +280,9 @@ pub trait ObjectWriter<T> {
 // Public Macros
 // ------------------------------------------------------------------------------------------------
 
+///
+/// Provides a boiler-place implementation of [`HasOptions`].
+///
 #[macro_export]
 macro_rules! impl_has_options {
     ($impl_type: ty, $option_type: ty) => {
@@ -140,6 +301,10 @@ macro_rules! impl_has_options {
     };
 }
 
+///
+/// Provides a simple implementation of [`ObjectWriter`] where the existing implementation of
+/// `Display` provides the serialized form via the `ToString` trait.
+///
 #[macro_export]
 macro_rules! impl_to_string_writer {
     ($impl_type: ty, $object_type: ty) => {
@@ -157,6 +322,10 @@ macro_rules! impl_to_string_writer {
     };
 }
 
+///
+/// Provides a simple implementation of [`ObjectWriter`] where an existing implementation of
+/// `Into<String>` provides the serialized form.
+///
 #[macro_export]
 macro_rules! impl_into_string_writer {
     ($impl_type: ty, $object_type: ty) => {
