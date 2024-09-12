@@ -10,7 +10,7 @@ specific object types in specific formats.
 
 ## Example
 
-TBD.
+TBD
 
 ## Changes
 
