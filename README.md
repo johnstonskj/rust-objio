@@ -2,6 +2,8 @@
 
 This crate provides simple traits for reading and writing objects.
 
+[![codecov](https://codecov.io/gh/johnstonskj/rust-objio/graph/badge.svg?token=yQLMeb2Io3)](https://codecov.io/gh/johnstonskj/rust-objio)
+
 The traits `ObjectReader` and `ObjectWriter` are **not** intended as a generalized
 serialization framework like serde, they are provided to simply read/write
 specific object types in specific formats.
